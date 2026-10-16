@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // IMPORTANT: Replace ADMIN_UID_HERE with your teacher account's Firebase Auth UID.
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.uid == "ADMIN_UID_HERE"; }
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isApprovedStudent() {
+      return hasProfile() && myProfile().approved == true && myProfile().role == "student";
+    }
+
+    match /users/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == "student"
+        && request.resource.data.approved == false
+        && request.resource.data.classId == "";
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow update, delete: if isAdmin();
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if isAdmin() || (
+        isApprovedStudent() && resource.data.classId == myProfile().classId
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /homework/{homeworkId} {
+      allow read: if isAdmin() || (
+        isApprovedStudent() && resource.data.classId == myProfile().classId
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /submissions/{submissionId} {
+      allow create: if isApprovedStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.classId == myProfile().classId
+        && request.resource.data.homeworkId is string
+        && get(/databases/$(database)/documents/homework/$(request.resource.data.homeworkId)).data.classId == myProfile().classId;
+      allow read: if isAdmin() || (
+        signedIn() && resource.data.studentId == request.auth.uid
+      );
+      allow update, delete: if isAdmin();
+    }
+  }
+}
